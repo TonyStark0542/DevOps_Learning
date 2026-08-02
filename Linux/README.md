@@ -12,10 +12,13 @@ The biggest thing I'd been getting wrong: I assumed a high load average meant so
  
 ## What it does
  
-- CPU diagnosis
-- Memory diagnosis
-- Disk space and disk I/O diagnosis
-- Network diagnosis
+Runs one pass across every subsystem and prints the output with the relevant columns called out:
+ 
+- **System identity and overview** — hostname, kernel, OS, uptime, core count, load average, plus the last 20 kernel errors and warnings from `dmesg`
+- **CPU** — run queue depth and iowait from `vmstat`, so you can tell CPU saturation apart from a disk bottleneck, plus the top 10 CPU-consuming processes
+- **Memory** — swap in/out activity, total and available RAM, and the top 20 processes by memory with RSS in MB
+- **Disk** — free space and inode usage per filesystem, plus per-device utilization and I/O queue length from `iostat`
+- **Network** — dropped and errored packets per interface, the list of listening TCP/UDP ports, and actual send/receive throughput from `sar`
 ## How to run it
  
 Clone this repo, or just copy the `healthcheck.sh` script file on its own. Then make it executable and run it:
@@ -42,7 +45,7 @@ dmesg --level=err,warn | tail -20
 ```
  
 This catches any underlying hardware or kernel-level errors that might be the actual root cause — sometimes what looks like a performance issue is really a failing disk or a driver problem showing up in the kernel log.
-
+ 
 ### 2. CPU
  
 To check for CPU saturation, I run:
@@ -69,8 +72,7 @@ ps aux --sort=-%cpu | head -10
  
 (`top` shows the same thing interactively, but `ps` works inside a script that runs and exits.)
 
-<img width="1766" height="972" alt="Screenshot From 2026-08-03 00-51-58" src="https://github.com/user-attachments/assets/7e41901d-deea-442f-80ce-9f99e09c6e0d" />
-
+<img width="1766" height="972" alt="Screenshot From 2026-08-03 00-51-58" src="https://github.com/user-attachments/assets/8f08306a-41a7-45c9-9a34-006d8d0ad430" />
  
 ### 3. Memory
  
@@ -96,9 +98,8 @@ ps aux --sort=-%mem
  
 This sorts every running process by memory usage, so the heaviest consumer shows up right at the top.
 
-<img width="1766" height="926" alt="Screenshot From 2026-08-03 00-52-45" src="https://github.com/user-attachments/assets/66d81512-1411-4f44-8193-49ec594527d2" />
+<img width="1766" height="926" alt="Screenshot From 2026-08-03 00-52-45" src="https://github.com/user-attachments/assets/064fa85e-449d-4cc4-b4bd-1be6e985eb04" />
 
- 
 ### 4. Disk speed and I/O
  
 For disk performance, I run:
@@ -116,11 +117,18 @@ df -h
 ```
  
 since a server that's simply out of space can look like a performance issue at first glance.
+ 
+And inode usage:
+ 
+```bash
+df -i
+```
+ 
+This one catches a failure mode that's confusing if you don't know to look for it — a filesystem can be sitting at 40% disk usage and still refuse to create new files, because it's run out of inodes. Lots of tiny files (session data, cache, log fragments) will do this. `df -h` shows plenty of room; `df -i` shows the real problem.
 
-<img width="1915" height="380" alt="Screenshot From 2026-08-03 00-54-09" src="https://github.com/user-attachments/assets/d5bda9ea-040e-4647-bf47-81e74499e555" />
-<img width="1915" height="963" alt="Screenshot From 2026-08-03 00-53-40" src="https://github.com/user-attachments/assets/34101423-8a56-4111-886f-99f42f79c652" />
-<img width="1766" height="443" alt="Screenshot From 2026-08-03 00-53-22" src="https://github.com/user-attachments/assets/755d5e35-5300-4afb-896a-f89ce5d28991" />
-
+<img width="1766" height="443" alt="Screenshot From 2026-08-03 00-53-22" src="https://github.com/user-attachments/assets/46f2b39a-d043-4306-8b10-840649902e94" />
+<img width="1915" height="963" alt="Screenshot From 2026-08-03 00-53-40" src="https://github.com/user-attachments/assets/814c12db-4693-404c-b964-28cfd40228be" />
+<img width="1915" height="380" alt="Screenshot From 2026-08-03 00-54-09" src="https://github.com/user-attachments/assets/142d3079-c67a-41ec-9f5c-e8b5c3151cf5" />
  
 ### 5. Network
  
@@ -146,6 +154,7 @@ sar -n DEV 2 5
  
 This shows real send/receive rates on the interface, which tells me if the server is actually pushing a lot of traffic or if the network is idle while something else is the real problem.
 
-<img width="1915" height="817" alt="Screenshot From 2026-08-03 00-54-33" src="https://github.com/user-attachments/assets/58a5dab9-bccb-491b-b79b-950a4583717c" />
-<img width="1915" height="952" alt="Screenshot From 2026-08-03 00-55-12" src="https://github.com/user-attachments/assets/2a7194da-6348-40b4-a6b1-08cfac9c8fcc" />
-<img width="1915" height="952" alt="Screenshot From 2026-08-03 00-55-25" src="https://github.com/user-attachments/assets/ac48a125-795d-4802-a5ac-97305e22fba0" />
+<img width="1915" height="817" alt="Screenshot From 2026-08-03 00-54-33" src="https://github.com/user-attachments/assets/32d9a001-3fbf-4523-8e0e-0639aeba8a56" />
+<img width="1915" height="952" alt="Screenshot From 2026-08-03 00-55-12" src="https://github.com/user-attachments/assets/9a683efd-85b8-4b6b-bf34-ec843f36f19a" />
+<img width="1915" height="952" alt="Screenshot From 2026-08-03 00-55-25" src="https://github.com/user-attachments/assets/9d3a46ab-60de-4759-9c84-aaf56b46e187" />
+
