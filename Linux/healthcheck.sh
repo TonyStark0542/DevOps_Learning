@@ -36,10 +36,11 @@ line
 
 # CPU saturation check
 echo "CPU Details:"
-echo "Check for CPU & Memory Saturation (watch the 'r' column vs core count):"
+echo "Watch 'r' (run queue) vs core count for CPU saturation."
+echo "Also watch 'wa' (iowait) — high 'wa' with low 'us'/'sy' means the CPU"
+echo "is idle and waiting on disk, not overloaded. Check disk I/O below."
 vmstat 2 10
 echo ""
-echo "Top CPU-consuming processes:"
 ps aux --sort=-%cpu | head -10 | awk '
 NR==1 {
     printf "%-10s %-7s %-5s %-5s %9s %s\n", "USER","PID","%CPU","%MEM","RSS(MB)","COMMAND"
