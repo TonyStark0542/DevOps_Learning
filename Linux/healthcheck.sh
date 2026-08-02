@@ -1,48 +1,94 @@
 #!/bin/bash
 
-# Identity
+# Simple separator so each section is easy to spot when scrolling through output
+line() {
+    echo "-----------------------------------------------------"
+}
+
+# Check a command exists before relying on it, so the script fails
+# with a clear message instead of a random "command not found" mid-run
+require() {
+    if ! command -v "$1" &> /dev/null; then
+        echo "Note: '$1' is not installed. Skipping that check."
+        echo "(On Debian/Ubuntu: sudo apt install sysstat iproute2)"
+        return 1
+    fi
+    return 0
+}
+
+line
 echo "Hostname: $(hostname)"
 echo "Date & Time: $(date)"
 echo "Uptime: $(uptime)"
-echo "Kernal Version: $(uname -r)"
+echo "Kernel Version: $(uname -r)"
 echo "OS: $(grep "PRETTY_NAME" /etc/os-release | cut -d'"' -f2)"
-echo ""
+line
 
-# first we will be find the saturation of CPU:
-echo "CPU Details:"
-echo "CPU Cores: $(nproc)" && top -b -n 1 | awk '/load average:/ {print "Load Average:" $NF-2, $NF-1, $NF} /%Cpu\(s\):/ {for(i=1;i<=NF;i++) if($i~/wa/) print "IO Wait: " $(i-1) "%"}'
+# The big picture — load average vs core count, plus any kernel-level
+# errors that might be the real root cause instead of a resource bottleneck
+echo "System Overview:"
+echo "CPU Cores: $(nproc)"
+echo "Load Average:$(uptime | awk -F'load average:' '{print $2}')"
 echo ""
-echo "Check for CPU & Memory Saturation:"
+echo "Recent kernel errors/warnings:"
+dmesg --level=err,warn 2>/dev/null | tail -20 || echo "(dmesg needs sudo to read the kernel ring buffer — try running this script with sudo)"
+line
+
+# CPU saturation check
+echo "CPU Details:"
+echo "Check for CPU & Memory Saturation (watch the 'r' column vs core count):"
 vmstat 2 10
 echo ""
-
-# Memory & Swap Details
-echo "Check for Memory & Swap Details:"
-free -h
-echo ""
-ps aux --sort=-%mem | head -20 | awk '
+echo "Top CPU-consuming processes:"
+ps aux --sort=-%cpu | head -10 | awk '
 NR==1 {
-    printf "%-10s %-7s %-5s %-5s %8s %9s %s\n", "USER", "PID", "%CPU", "%MEM", "VSZ(GB)", "RSS(MB)", "COMMAND"
+    printf "%-10s %-7s %-5s %-5s %9s %s\n", "USER","PID","%CPU","%MEM","RSS(MB)","COMMAND"
 }
 NR>1 {
     split($11, a, "/")
-    printf "%-10s %-7s %-5s %-5s %6.2fGB %7.1fMB %s\n", $1, $2, $3, $4, $5/1024/1024, $6/1024, a[length(a)]
-}'| column -t
+    printf "%-10s %-7s %-5s %-5s %7.1fMB %s\n", $1,$2,$3,$4, $6/1024, a[length(a)]
+}' | column -t
+line
 
-# Disk space and Disk i/o & inodes:
+# Memory & Swap Details
+echo "Memory & Swap Details:"
+echo "Watch the 'si' and 'so' columns — non-zero means active swapping:"
+vmstat 2 5
 echo ""
+free -h
+echo ""
+echo "Top memory-consuming processes:"
+ps aux --sort=-%mem | head -20 | awk '
+NR==1 {
+    printf "%-10s %-7s %-5s %-5s %9s %s\n", "USER","PID","%CPU","%MEM","RSS(MB)","COMMAND"
+}
+NR>1 {
+    split($11, a, "/")
+    printf "%-10s %-7s %-5s %-5s %7.1fMB %s\n", $1,$2,$3,$4, $6/1024, a[length(a)]
+}' | column -t
+line
+
+# Disk space and Disk I/O & inodes:
 echo "Check Disk Space:"
 df -h
 echo ""
-echo "Check Disk I/O:"
-iostat -xz 2 5
+echo "Check Disk I/O (watch %util and aqu-sz):"
+if require iostat; then
+    iostat -xz 2 5
+fi
+line
 
 # Network:
-echo ""
-echo "Check the network interface physical error:"
+echo "Check the network interface for physical errors (rx/tx):"
 ip -s link show
+echo ""
 echo "Network Open Ports:"
-ss -tuln
+if require ss; then
+    ss -tuln
+fi
 echo ""
 echo "Network Utilization:"
-sar -n DEV 2 5
+if require sar; then
+    sar -n DEV 2 5
+fi
+line
