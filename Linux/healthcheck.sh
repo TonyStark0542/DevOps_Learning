@@ -41,14 +41,8 @@ echo "Also watch 'wa' (iowait) — high 'wa' with low 'us'/'sy' means the CPU"
 echo "is idle and waiting on disk, not overloaded. Check disk I/O below."
 vmstat 2 10
 echo ""
-ps aux --sort=-%cpu | head -10 | awk '
-NR==1 {
-    printf "%-10s %-7s %-5s %-5s %9s %s\n", "USER","PID","%CPU","%MEM","RSS(MB)","COMMAND"
-}
-NR>1 {
-    split($11, a, "/")
-    printf "%-10s %-7s %-5s %-5s %7.1fMB %s\n", $1,$2,$3,$4, $6/1024, a[length(a)]
-}' | column -t
+echo "Top CPU-consuming processes:"
+ps aux --sort=-%cpu | head -10
 line
 
 # Memory & Swap Details
@@ -72,6 +66,9 @@ line
 # Disk space and Disk I/O & inodes:
 echo "Check Disk Space:"
 df -h
+echo ""
+echo "Check Inode Usage (a filesystem can be out of inodes with space left):"
+df -i
 echo ""
 echo "Check Disk I/O (watch %util and aqu-sz):"
 if require iostat; then
