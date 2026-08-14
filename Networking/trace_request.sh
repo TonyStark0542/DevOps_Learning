@@ -21,6 +21,21 @@ ok()      { printf "  ${GREEN}✓${RESET} %s\n" "$1"; }
 warn()    { printf "  ${YELLOW}!${RESET} %s\n" "$1"; }
 fail()    { printf "  ${RED}✗${RESET} %s\n" "$1"; }
 
+# Renders a TTL in seconds as a readable duration.
+format_ttl() {
+  local ttl="$1" h m s
+  h=$(( ttl / 3600 ))
+  m=$(( (ttl % 3600) / 60 ))
+  s=$(( ttl % 60 ))
+  if [ "$h" -gt 0 ]; then
+    echo "${h}h ${m}m ${s}s"
+  elif [ "$m" -gt 0 ]; then
+    echo "${m}m ${s}s"
+  else
+    echo "${s}s"
+  fi
+}
+
 # ---------- argument check ----------
 if [ $# -ne 1 ]; then
   echo "Usage: $0 <domain>" >&2
@@ -70,13 +85,13 @@ if [ -z "$DIG_OUT" ]; then
   exit 1
 fi
 
-echo "$DIG_OUT" | while read -r name ttl class type ip; do
-  ok "$name -> $ip  (type $type, TTL ${ttl}s = $((ttl/60))m $((ttl%60))s remaining before this is re-checked)"
-done
+# Loop through the DNS lookup results to log the IP and record details 
+while read -r name ttl class type ip; do
+  ok "$name -> $ip  (type $type, TTL $(format_ttl "$ttl") remaining before this is re-checked)"
+  RESOLVED_IP="$ip"
+done <<< "$DIG_OUT"
 
-# Grab the first resolved IP for the stages below
-RESOLVED_IP=$(dig +short "$DOMAIN" A | head -n1)
-if [ -z "$RESOLVED_IP" ]; then
+if [ -z "${RESOLVED_IP:-}" ]; then
   fail "Could not extract a usable IP from the DNS answer. Stopping."
   exit 1
 fi
@@ -89,8 +104,12 @@ section "2. Network path"
 if [ "$HAVE_PING" -eq 1 ]; then
   if PING_OUT=$(ping -c 3 -W 2 "$DOMAIN" 2>&1); then
     LOSS=$(echo "$PING_OUT" | grep -oE '[0-9]+% packet loss' || echo "unknown loss")
-    AVG=$(echo "$PING_OUT" | tail -1 | grep -oE 'min/avg/max[^=]*= [0-9.]+/[0-9.]+' | grep -oE '[0-9.]+ms?$|[0-9.]+$' | tail -1)
-    ok "ping reachable — $LOSS"
+    AVG=$(echo "$PING_OUT" | grep -oE '= [0-9.]+/[0-9.]+/[0-9.]+' | awk -F'/' '{print $2}')
+    if [ -n "$AVG" ]; then
+      ok "ping reachable — $LOSS, avg latency ${AVG}ms"
+    else
+      ok "ping reachable — $LOSS"
+    fi
   else
     warn "ping got no reply (packet loss or ICMP blocked — common on cloud/firewalled hosts, not necessarily a real problem)"
   fi
@@ -111,34 +130,56 @@ fi
 section "3. TCP reachability (ports 80 / 443)"
 
 check_port() {
+  # Accept the first argument as the port number to test
   local port="$1"
   local start end elapsed
+
+  # Start a high-precision stopwatch using nanoseconds
   start=$(date +%s%N)
+
+  # Check if the 'nc' (Netcat) utility is available on the system
   if [ "$HAVE_NC" -eq 1 ]; then
+
+    # Probe the port with Netcat, allowing 4 seconds to connect and a 5-second total safety limit
     if timeout 5 nc -z -w 4 "$DOMAIN" "$port" 2>/dev/null; then
+      
+      # Stop the stopwatch and convert the nanosecond duration into milliseconds
       end=$(date +%s%N); elapsed=$(( (end - start) / 1000000 ))
+
+      # Log a successful connection along with the response speed
       ok "port $port open (connected in ${elapsed}ms)"
       return 0
     else
+
+      # Stop the stopwatch and calculate elapsed time for the failed connection attempt
       end=$(date +%s%N); elapsed=$(( (end - start) / 1000000 ))
+
+      # If the connection took roughly 4 seconds or longer, it means the network dropped our packets
       if [ "$elapsed" -ge 3900 ]; then
         fail "port $port — timeout (no response at all — likely a firewall dropping silently, not the app)"
+      
+      # If it failed instantly, the server actively rejected the connection request
       else
         fail "port $port — refused (something answered and said no — host is up, nothing listening on $port)"
       fi
       return 1
     fi
   else
-    # Fallback with bash's own /dev/tcp if nc isn't available
+    # Fallback to Bash's built-in networking feature if Netcat is missing
     if timeout 5 bash -c "echo > /dev/tcp/$DOMAIN/$port" 2>/dev/null; then
+      
+      # Log a successful connection using the fallback method
       ok "port $port open"
       return 0
     else
+      
+      # Log a generic error since Bash's internal tool cannot distinguish between timeouts and refusals
       fail "port $port — unreachable (refused or timed out; install 'nc' for a clearer distinction)"
       return 1
     fi
   fi
 }
+
 
 check_port 80
 PORT_443_OPEN=1
